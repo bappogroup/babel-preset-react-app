@@ -61,6 +61,7 @@ module.exports = function(api, opts, env) {
           useBuiltIns: 'entry',
           // Do not transform modules to CJS
           modules: false,
+          debug: !!opts.debug,
         },
       ],
       [
