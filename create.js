@@ -6,6 +6,8 @@
  */
 'use strict';
 
+const path = require('path');
+
 const validateBoolOption = (name, value, defaultValue) => {
   if (typeof value === 'undefined') {
     value = defaultValue;
@@ -26,7 +28,21 @@ module.exports = function(api, opts, env) {
   var isEnvDevelopment = env === 'development';
   var isEnvProduction = env === 'production';
   var isEnvTest = env === 'test';
+
   var isFlowEnabled = validateBoolOption('flow', opts.flow, true);
+  var areHelpersEnabled = validateBoolOption('helpers', opts.helpers, true);
+  var useAbsoluteRuntime = validateBoolOption(
+    'absoluteRuntime',
+    opts.absoluteRuntime,
+    true
+  );
+
+  var absoluteRuntimePath = undefined;
+  if (useAbsoluteRuntime) {
+    absoluteRuntimePath = path.dirname(
+      require.resolve('@babel/runtime/package.json')
+    );
+  }
 
   if (!isEnvDevelopment && !isEnvProduction && !isEnvTest) {
     throw new Error(
@@ -45,7 +61,7 @@ module.exports = function(api, opts, env) {
         require('@babel/preset-env').default,
         {
           targets: {
-            node: '6.12',
+            node: 'current',
           },
         },
       ],
@@ -53,12 +69,9 @@ module.exports = function(api, opts, env) {
         // Latest stable ECMAScript features
         require('@babel/preset-env').default,
         {
-          // `entry` transforms `@babel/polyfill` into individual requires for
-          // the targeted browsers. This is safer than `usage` which performs
-          // static code analysis to determine what's required.
-          // This is probably a fine default to help trim down bundles when
-          // end-users inevitably import '@babel/polyfill'.
-          useBuiltIns: 'entry',
+          // If users import all core-js they're probably not concerned with
+          // bundle size. We shouldn't rely on magic to try and shrink it.
+          useBuiltIns: false,
           // Do not transform modules to CJS
           modules: false,
           debug: !!opts.debug,
@@ -103,12 +116,22 @@ module.exports = function(api, opts, env) {
           useBuiltIns: true,
         },
       ],
-      // Polyfills the runtime needed for async/await and generators
+      // Polyfills the runtime needed for async/await, generators, and friends
+      // https://babeljs.io/docs/en/babel-plugin-transform-runtime
       [
         require('@babel/plugin-transform-runtime').default,
         {
-          helpers: false,
+          corejs: false,
+          helpers: areHelpersEnabled,
           regenerator: true,
+          // https://babeljs.io/docs/en/babel-plugin-transform-runtime#useesmodules
+          // We should turn this on once the lowest version of Node LTS
+          // supports ES Modules.
+          useESModules: isEnvDevelopment || isEnvProduction,
+          // Undocumented option that lets us encapsulate our runtime, ensuring
+          // the correct version is used
+          // https://github.com/babel/babel/blob/090c364a90fe73d36a30707fc612ce037bdbbb24/packages/babel-plugin-transform-runtime/src/index.js#L35-L42
+          absoluteRuntime: absoluteRuntimePath,
         },
       ],
       isEnvProduction && [
@@ -116,14 +139,6 @@ module.exports = function(api, opts, env) {
         require('babel-plugin-transform-react-remove-prop-types').default,
         {
           removeImport: true,
-        },
-      ],
-      // function* () { yield 42; yield 43; }
-      !isEnvTest && [
-        require('@babel/plugin-transform-regenerator').default,
-        {
-          // Async functions are converted to generators by @babel/preset-env
-          async: false,
         },
       ],
       // Adds syntax support for import()
